@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "memoliertorerr.tapthetab",
+  "name": "TapTheTab",
+  "version": "0.0.1",
+  "author": "memoliertorerr",
+  "description": "Every window, one tap away: a keyboard-first, search-first window switcher",
+  "license": "MIT",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Switcher.qml"
+  }
+}
