@@ -2,6 +2,8 @@
 
 Research snapshot taken 2026-10-30 against the Omarchy source on branch `quattro`. Paths and line numbers are in the Omarchy repo, not this one; re-check them before relying on them, since Omarchy moves fast.
 
+> **Correction (2026-10-31):** `quattro` is Omarchy's development branch. Users and the CI VM run the stable release (4.0.6), which lacks several things described below: `qs.Ui` `OverlayWindow` and `FilterInput`, `qs.Commons` `ShellIpc`, and `o.bind_hold`. Use a plain `PanelWindow` (as stable's emoji picker does), Quickshell's `IpcHandler`, and `o.bind(..., { release = true })`. Check any API at the release tag before using it (PLAN Ground Rule 8).
+
 **Bottom line:** no hard blocker. A third-party plugin is unsandboxed QML inside `omarchy-shell`. It can import `qs.Commons`, `qs.Ui`, `Quickshell.Hyprland`, `Quickshell.Wayland` and `Quickshell.Io`, create its own `PanelWindow` with `WlrKeyboardFocus.Exclusive`, run processes, and register its own IPC targets and Hyprland global shortcuts. The one real unknown: whether Qt delivers a key **release** for Alt when the overlay took keyboard focus while Alt was already held. There is a fallback (a Hyprland release bind on the Alt keysym, see §3).
 
 ## 1. Plugin contract

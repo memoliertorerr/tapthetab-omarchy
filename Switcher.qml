@@ -58,10 +58,18 @@ Item {
     return out
   }
 
-  OverlayWindow {
+  // A plain PanelWindow, as the emoji picker in stable Omarchy (4.0.x) builds
+  // its overlay. qs.Ui's OverlayWindow only exists on Omarchy's development
+  // branch; switch to it once a stable release ships it.
+  PanelWindow {
     id: panel
-    shown: root.opened
+    visible: root.opened
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
     WlrLayershell.namespace: "tapthetab"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    exclusionMode: ExclusionMode.Ignore
 
     Rectangle {
       anchors.fill: parent

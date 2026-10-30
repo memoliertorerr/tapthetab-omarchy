@@ -31,13 +31,22 @@ qmllint=$(command -v qmllint || command -v qmllint6 || echo /usr/lib/qt6/bin/qml
 [[ -x $qmllint ]] || { echo "qmllint not found"; exit 2; }
 lint_root=$(mktemp -d)
 ln -s "$OMARCHY_PATH/shell" "$lint_root/qs"
-mapfile -t files < <(find . -name '*.qml' -not -path './.git/*' | sort)
-echo "qmllint $("$qmllint" --version 2>/dev/null | head -n 1) on ${files[*]}"
+# The first run found no files with find + mapfile and gave no reason, so list
+# them with globs and show the directory if the list is still empty.
+# With globstar, ** also matches the top level; it skips .git (no dotglob).
+shopt -s nullglob globstar
+files=(**/*.qml)
+if (( ${#files[@]} == 0 )); then
+  echo "no QML files found in $PWD"
+  ls -la
+  exit 2
+fi
+echo "qmllint $("$qmllint" --version 2>/dev/null | head -n 1) in $PWD on ${files[*]}"
 "$qmllint" -I "$OMARCHY_PATH/shell" -I "$lint_root" --json /tmp/tto-qmllint.json "${files[@]}" || true
 rm -rf "$lint_root"
-jq -r '.files[] | .filename as $file | .warnings[] |
+jq -r '(.files // [])[] | .filename as $file | (.warnings // [])[] |
   "\($file):\(.line // 0):\(.column // 0): \(.type): \(.message) [\(.id // "")]"' /tmp/tto-qmllint.json
-jq -e '[.files[].warnings[] | select(.type == "critical" or .type == "fatal")] | length == 0' /tmp/tto-qmllint.json >/dev/null
+jq -e '[(.files // [])[] | (.warnings // [])[] | select(.type == "critical" or .type == "fatal")] | length == 0' /tmp/tto-qmllint.json >/dev/null
 LINT
 lint_ok=1
 log "qmllint"

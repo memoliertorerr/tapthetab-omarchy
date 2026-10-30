@@ -91,10 +91,11 @@ The agent can run the unit tests on this Mac and read CI results. It cannot run 
 5. **No polling, no idle processes.** React to Hyprland raw events (`activewindowv2`, `openwindow`, `closewindow`, `movewindowv2`) and Quickshell signals. No `Timer` that starts a `Process`, ever. Any timer runs only while the switcher is open. Omarchy fails a shell that spawns a process during 30 idle seconds; we hold ourselves to the same bar.
 6. **Logic lives in pure JS** under `lib/`, ES5 style (`var`, `function`) to match Omarchy, ending in `if (typeof module !== "undefined") module.exports = {...}`. QML imports it; `node --test` tests it. QML files hold wiring and visuals only.
 7. **Follow Omarchy's shell rules** (summarised in `docs/research/omarchy-plugin-api.md` §7): entry is an `Item` with `open(payloadJson)`, `close()`, `opened`; `import qs.Commons as Commons` for colours and fonts; **no open/close animation** (pickers summoned by a keystroke never animate); every duration through `Style.duration(ms)`, easing `Style.easeOut`, nothing over 300 ms.
-8. **Privacy, as on macOS:** no network access, no telemetry, nothing written outside the plugin's own settings entry.
-9. **Never touch the user's config automatically.** Keybindings are a snippet the user pastes into `~/.config/hypr/bindings.lua` (the README says how). `omarchy plugin add` runs no hooks, and we don't work around that.
-10. **Plugin id is `memoliertorerr.tapthetab`, forever.** Global shortcut appid and IPC target are `tapthetab`. Changing them breaks every user's bindings.
-11. **Every step:** ask questions if genuinely uncertain, and update `AGENTS.md` (file structure, conventions), `README.md` (user-facing behaviour) and this plan (tracker, implementation notes, landmines).
+8. **Target stable Omarchy, not the development branch.** Users run the current stable release, which is also what the CI VM boots (4.0.6 on 2026-10-31). Before using any Omarchy shell API, check it exists at that release tag: `gh api "repos/omacom/omarchy/contents/<path>?ref=v4.0.6" --jq .content | base64 -d`. The local checkout at `/Users/memoli/Downloads/omarchy-quattro` is the `quattro` development branch and has APIs stable lacks (`qs.Ui` `OverlayWindow` and `FilterInput`, `qs.Commons` `ShellIpc`, `o.bind_hold`).
+9. **Privacy, as on macOS:** no network access, no telemetry, nothing written outside the plugin's own settings entry.
+10. **Never touch the user's config automatically.** Keybindings are a snippet the user pastes into `~/.config/hypr/bindings.lua` (the README says how). `omarchy plugin add` runs no hooks, and we don't work around that.
+11. **Plugin id is `memoliertorerr.tapthetab`, forever.** Global shortcut appid and IPC target are `tapthetab`. Changing them breaks every user's bindings.
+12. **Every step:** ask questions if genuinely uncertain, and update `AGENTS.md` (file structure, conventions), `README.md` (user-facing behaviour) and this plan (tracker, implementation notes, landmines).
 
 ### Rollback
 
@@ -163,7 +164,7 @@ Update AGENTS.md's file-structure section. Run `node --test`. Flip TTO1 to ✅ i
 **Implementation notes (2026-10-30):**
 
 - Built by the orchestrating session in parallel with TTO2 and TTO3, so the three steps landed in one batch of commits.
-- `Switcher.qml` follows Omarchy's emoji picker (`OverlayWindow`, `BorderSurface`, key catcher with `Keys.priority: Keys.BeforeItem`). Every `Style.*` token it uses was checked against the Omarchy source.
+- `Switcher.qml` follows Omarchy's emoji picker (`BorderSurface`, key catcher with `Keys.priority: Keys.BeforeItem`). It first used `qs.Ui` `OverlayWindow`, which exists only on Omarchy's development branch; the first VM run failed with `OverlayWindow is not a type`, and it now builds a plain `PanelWindow` like stable 4.0.6's emoji picker. Every `Style.*` token it uses was then re-checked against v4.0.6.
 - `tests/manifest.test.js` was checked to fail on a reserved `omarchy.` id and pass on the real one.
 - **Not verified by the session that built it:** whether `Switcher.qml` loads. The first `vm` run is its first real test.
 
@@ -249,7 +250,7 @@ Step TTO4: make the switcher real, opened by a summon (hold-Alt comes in TTO5). 
 
 Build:
 - lib/Windows.js (pure, tested): turn Hyprland toplevel snapshots into Items (skip entries with no appId or with a parent, as Omarchy's dock does; mark windows on special/minimized workspaces as minimized), merge with the MRU list, handle windows opening/closing between summons.
-- In Switcher.qml: an MRU tracker driven by Hyprland.onRawEvent (activewindowv2 → move address to front; openwindow; closewindow → remove), seeded once at load from focusHistoryID after a single Hyprland.refreshToplevels(). No timers. On open(): build items, create a Session, render the ranked list, focus the key catcher. Typing filters (reuse qs.Ui FilterInput or the Util.editsFilter helpers the research doc names); arrows/Tab/Shift+Tab move the selection; Enter or click activates; Escape dismisses.
+- In Switcher.qml: an MRU tracker driven by Hyprland.onRawEvent (activewindowv2 → move address to front; openwindow; closewindow → remove), seeded once at load from focusHistoryID after a single Hyprland.refreshToplevels(). No timers. On open(): build items, create a Session, render the ranked list, focus the key catcher. Typing filters (use the Util.editsFilter / Util.editedFilter helpers from qs.Commons, as stable Omarchy's emoji picker does; qs.Ui FilterInput is development-branch only); arrows/Tab/Shift+Tab move the selection; Enter or click activates; Escape dismisses.
 - Activation: Hyprland.dispatch with hl.dsp.focus + hl.dsp.window.alter_zorder({ mode = "top" }) on the window address; bring minimized windows to the active workspace first, mirroring Omarchy's dock bringForward (/Users/memoli/Downloads/omarchy-quattro/shell/plugins/dock/Dock.qml:186-214, read-only). Close the overlay before focusing so focus lands on the window, not back on the layer.
 - ci/scenarios/02-mru-search-switch.sh as described in this step's Verify line, plus an idle check modelled on Omarchy's test/shell.d/shell-idle-spawn-test.sh (read it; adapt the idea, don't copy the whole harness).
 
@@ -270,7 +271,7 @@ Update AGENTS.md and README.md (what works now). Flip TTO4 to ✅ in docs/PLAN.m
 ```text
 Step TTO5: the core feel — hold Alt, tap Tab, release to switch. This is a spike first, then an implementation. Read AGENTS.md, docs/PLAN.md (Design Decisions: release detection), docs/research/omarchy-plugin-api.md §2–§3, and docs/research/port-spec.md (show delay, quick tap).
 
-1. Global shortcuts: in Switcher.qml (keepLoaded), declare Quickshell.Hyprland GlobalShortcut objects with appid "tapthetab": next, prev, commit, cancel. Also a ShellIpc target "tapthetab" with the same verbs, for testing and for users who prefer exec binds.
+1. Global shortcuts: in Switcher.qml (keepLoaded), declare Quickshell.Hyprland GlobalShortcut objects with appid "tapthetab": next, prev, commit, cancel. Also a Quickshell IpcHandler with target "tapthetab" and the same verbs, for testing and for users who prefer exec binds (qs.Commons ShellIpc does not exist in stable Omarchy 4.0.x).
 2. Spike, with evidence: does the exclusive-keyboard OverlayWindow receive Keys.onReleased for Alt (or a modifiers change dropping Alt) when it was mapped while Alt was already held? Add a temporary scenario that logs what arrives (console.info into the shell log, read via `qs log`) and report the result before building on it. Write the finding into the Implementation notes either way.
 3. Implement: `next` while closed opens a session with the second MRU window pre-selected and starts a show timer (default 90 ms, from port-spec.md); the overlay window stays unmapped (or fully transparent with no visible frame — check what OverlayWindow allows) until the timer fires. `commit` before the timer → activate the pre-selected window with no flash. `commit` after → activate the selection. Commit is idempotent (Qt release and the Hyprland bind may both fire). Timers exist only while a session is active.
 4. Bindings: add extras/bindings.lua — the snippet users paste into ~/.config/hypr/bindings.lua: unbind Omarchy's ALT+TAB and ALT+SHIFT+TAB (four binds on two chords, default/hypr/bindings/tiling.lua:55-58 in the Omarchy repo), bind them to hl.dsp.global("tapthetab:next"/"prev"), and add the Alt release bind on "ALT + Alt_L" with { release = true, transparent = true, ignore_mods = true, non_consuming = true } if the spike says we need it. In CI, apply that snippet to the VM user's bindings.lua (CI is not a user's machine — that's fine there) and verify both chords are really unbound (hl.unbind behaviour is unverified).
@@ -378,6 +379,7 @@ Run `node --test`. Flip TTO9 to ✅ in docs/PLAN.md in the same change, then sho
 
 Populated from real friction, not speculation:
 
+- **The research read Omarchy's development branch; users run stable.** The first VM run failed with `OverlayWindow is not a type`: `qs.Ui` `OverlayWindow` exists only on `quattro`. Also missing in stable 4.0.6: `qs.Ui` `FilterInput`, `qs.Commons` `ShellIpc`, `o.bind_hold`. Present in stable: Lua bindings with `release = true`, `PanelWindow` overlays, `BorderSurface`, `Border.surfaceSpec`, the `Style`/`Color` tokens used so far, `Util.editsFilter`. Ground Rule 8 now requires checking APIs against the release tag.
 - **Alt release on a layer surface is unproven.** Nothing in Omarchy's shell handles `Keys.onReleased`; the research found no precedent. TTO5 spikes it with evidence and keeps the Hyprland release bind as the fallback.
 - **`lastIpcObject.focusHistoryID` is stale** until `Hyprland.refreshToplevels()` runs; Omarchy's notifications service debounces and waits 250 ms after refreshing. Hence our own MRU from `activewindowv2` (Design Decisions).
 - **Window capture can make Omarchy spawn processes.** Its remote-session service reprobes on every Hyprland `screencast` raw event. TTO7 checks this before shipping previews.
