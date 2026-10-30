@@ -1,0 +1,106 @@
+#!/bin/bash
+
+# Boots a throwaway Omarchy VM and leaves it running for the scenarios.
+#
+# Adapted from Omarchy's test/ci-vm (https://github.com/omacom/omarchy,
+# MIT License, Copyright (c) David Heinemeier Hansson). Changes: it boots and
+# returns instead of running Omarchy's test suite, it adds a QMP socket so
+# scenarios can press real keys, and it copies this plugin's checkout in.
+#
+#   ci/vm-boot <image_dir> <checkout_dir>
+#
+#   image_dir     base.qcow2 with vmlinuz, initrd and cmdline beside it: the VM
+#                 image omarchy-iso publishes, and its unpacked/ files
+#   checkout_dir  this repository, .git included: `omarchy plugin add` clones it
+#
+# Env: TTO_VM_STATE (required; an empty directory under 60 bytes or so, since
+# the sockets in it must stay under 108), SMP (default 4), MEM (default 6G).
+# The caller stops the VM: kill the pid in $TTO_VM_STATE/qemu.pid.
+
+set -euo pipefail
+
+image=$1 checkout=$2
+source "$(dirname "$0")/lib.sh"
+started=$SECONDS
+seconds() { echo $(( SECONDS - started )); }
+
+[[ -s $image/base.qcow2 ]] || fail "no base.qcow2 in $image"
+[[ -d $checkout/.git ]] || fail "$checkout has no .git: omarchy plugin add needs a repository to clone"
+
+port=$(( 20000 + RANDOM % 10000 ))
+echo "$port" >"$TTO_VM_STATE/port"
+
+# A key made for this run only, handed in through the firmware tables as a
+# systemd credential: the image holds no key, and no run can reuse another's.
+ssh-keygen -q -t ed25519 -N '' -C tto-vm -f "$TTO_VM_STATE/id_ed25519"
+keys=$(printf 'd /home/omarchy/.ssh 0700 omarchy omarchy -\nf+ /home/omarchy/.ssh/authorized_keys 0600 omarchy omarchy - %s\n' \
+  "$(cat "$TTO_VM_STATE/id_ed25519.pub")" | base64 -w0)
+
+qemu-img create -qf qcow2 -b "$(realpath "$image/base.qcow2")" -F qcow2 "$TTO_VM_STATE/run.qcow2"
+# Straight into the kernel: no firmware, no boot loader. The image takes its
+# machine ID from -uuid, so every run is a machine of its own. The console
+# argument keeps systemd from waiting on a terminal that never answers. QMP is
+# how scenarios press keys: input-send-event reaches the guest as a keyboard.
+qemu-system-x86_64 -cpu host -enable-kvm -machine q35,accel=kvm -smp "${SMP:-4}" -m "${MEM:-6G}" \
+  -kernel "$image/vmlinuz" -initrd "$image/initrd" \
+  -append "$(cat "$image/cmdline") systemd.tty.term.console=dumb" \
+  -uuid "$(cat /proc/sys/kernel/random/uuid)" \
+  -drive "file=$TTO_VM_STATE/run.qcow2,format=qcow2,if=none,id=d0" -device virtio-blk-pci,drive=d0 \
+  -smbios "type=11,value=io.systemd.credential.binary:tmpfiles.extra=$keys" \
+  -device virtio-vga -device virtio-rng-pci -display none \
+  -netdev "user,id=n0,hostfwd=tcp:127.0.0.1:$port-:22" -device virtio-net-pci,netdev=n0 \
+  -qmp "unix:$TTO_VM_STATE/qmp.sock,server=on,wait=off" \
+  -pidfile "$TTO_VM_STATE/qemu.pid" -daemonize
+
+until CONNECT_TIMEOUT=1 ssh_vm true 2>/dev/null </dev/null; do
+  if ! kill -0 "$(cat "$TTO_VM_STATE/qemu.pid")" 2>/dev/null; then
+    fail "qemu exited before SSH came up"
+  elif (( $(seconds) >= 300 )); then
+    fail "no SSH after 300 s"
+  else
+    sleep 0.3
+  fi
+done
+log "vm-boot: SSH after $(seconds) s"
+
+# The whole working tree with its .git, as ~/src/tapthetab-omarchy. The plugin
+# is installed from there by `omarchy plugin add`, which clones it, so only
+# what is committed reaches the plugin; out/ is this run's own output.
+tar cf - -C "$checkout" --exclude=./out --exclude='./.git/objects/pack/tmp_*' . |
+  ssh_vm 'mkdir -p ~/src/tapthetab-omarchy && tar xf - -C ~/src/tapthetab-omarchy'
+ssh_vm 'git -C ~/src/tapthetab-omarchy log -1 --format="vm-boot: checkout at %h %s"' </dev/null ||
+  fail "the copied checkout is not a git repository with a commit"
+
+# The session's environment is what scenarios run in, so wait for the
+# compositor to publish itself there.
+until ssh_vm 'systemctl --user show-environment | grep -q ^HYPRLAND_INSTANCE_SIGNATURE=' </dev/null; do
+  if (( $(seconds) >= 300 )); then
+    fail "no desktop session after 300 s"
+  else
+    sleep 0.3
+  fi
+done
+log "vm-boot: desktop session up after $(seconds) s"
+
+# Nobody touches this machine, and after a few minutes without input Omarchy
+# turns the screen off. Screenshots would then be black.
+in_session 'omarchy-toggle-idle stay-awake' >/dev/null || fail "could not keep the session awake"
+
+# The shell starts after the compositor; scenarios talk to it, so wait for it.
+shell_answers() {
+  [[ $(shell_ipc shell ping) == "ok" ]]
+}
+if ! (wait_for 120 "the Omarchy shell to answer" shell_answers); then
+  in_session 'echo "OMARCHY_PATH=${OMARCHY_PATH:-<unset>}"; command -v omarchy-shell' >&2 || true
+  fail "the Omarchy shell did not answer ping"
+fi
+log "vm-boot: shell answers after $(seconds) s"
+
+in_session 'echo "Omarchy $(omarchy-version 2>/dev/null || echo "?"), OMARCHY_PATH=$OMARCHY_PATH"; hyprctl version | head -n 1'
+
+# QMP is only used by later scenarios; say whether it answers, don't stop here.
+if [[ $(qmp '{"execute":"query-status"}' 2>/dev/null) == *'"running"'* ]]; then
+  log "vm-boot: QMP answers"
+else
+  log "vm-boot: warning: QMP did not answer query-status"
+fi

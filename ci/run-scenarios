@@ -1,0 +1,79 @@
+#!/bin/bash
+
+# Boots one Omarchy VM (ci/vm-boot) and runs every ci/scenarios/*.sh against it
+# in order, from the host side. Each scenario sources ci/lib.sh and drives the
+# VM over SSH and QMP. The VM is thrown away at the end.
+#
+#   ci/run-scenarios <image_dir> [checkout_dir] [out_dir]
+#
+#   image_dir     the VM image, as for ci/vm-boot
+#   checkout_dir  this repository (default: the one this script is in)
+#   out_dir       gets one log per scenario, screenshots/, and the shell log
+#                 and user journal when anything failed (default: out)
+#
+# Env: TTO_SCENARIOS, a glob of scenario names to run instead of all of them
+# (e.g. "01-*"). VM_STATE_DIR, where the run's disk and sockets go (default
+# /var/tmp). SMP and MEM as for ci/vm-boot.
+
+set -euo pipefail
+
+ci=$(cd "$(dirname "$0")" && pwd)
+image=$1
+checkout=$(cd "${2:-$ci/..}" && pwd)
+out=${3:-out}
+mkdir -p "$out"
+out=$(cd "$out" && pwd)
+
+TTO_VM_STATE=$(mktemp -d "${VM_STATE_DIR:-/var/tmp}/tto-vm.XXXXXX")
+export TTO_VM_STATE TTO_OUT=$out
+source "$ci/lib.sh"
+trap - ERR
+
+cleanup() {
+  ssh -o ControlPath="$TTO_VM_STATE/ssh.sock" -O exit omarchy@127.0.0.1 2>/dev/null || true
+  if [[ -f $TTO_VM_STATE/qemu.pid ]]; then
+    kill "$(cat "$TTO_VM_STATE/qemu.pid")" 2>/dev/null || true
+  fi
+  rm -rf "$TTO_VM_STATE"
+}
+trap cleanup EXIT
+
+collect_logs() {
+  log "collecting the shell log and the user journal into $out"
+  in_session 'qs log -p "$OMARCHY_PATH/shell" --tail 300' >"$out/shell.log" 2>&1 || true
+  ssh_vm 'journalctl --user --no-pager -n 500' >"$out/journal.log" 2>&1 </dev/null || true
+  in_session 'hyprctl clients; hyprctl layers' >"$out/hyprland.txt" 2>&1 || true
+  (screenshot failure) >/dev/null 2>&1 || true
+}
+
+if ! "$ci/vm-boot" "$image" "$checkout" 2>&1 | tee "$out/vm-boot.log"; then
+  collect_logs
+  echo "::error::the VM did not come up; see vm-boot.log"
+  exit 1
+fi
+
+failed=()
+echo "| Scenario | Result |" >"$out/summary.md"
+echo "|---|---|" >>"$out/summary.md"
+for scenario in "$ci"/scenarios/*.sh; do
+  name=$(basename "$scenario" .sh)
+  [[ $name == ${TTO_SCENARIOS:-*} ]] || continue
+  log "=== $name"
+  if bash "$scenario" 2>&1 | tee "$out/$name.log"; then
+    log "=== $name passed"
+    echo "| $name | passed |" >>"$out/summary.md"
+  else
+    log "=== $name FAILED"
+    echo "::error::scenario $name failed; see $name.log in the artifact"
+    echo "| $name | **failed** |" >>"$out/summary.md"
+    failed+=("$name")
+  fi
+done
+
+if (( ${#failed[@]} > 0 )); then
+  collect_logs
+  log "failed: ${failed[*]}"
+  exit 1
+else
+  log "every scenario passed"
+fi
