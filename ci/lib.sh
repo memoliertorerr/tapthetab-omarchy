@@ -39,13 +39,17 @@ ssh_vm() {
 # unit of the user manager, which holds the session's environment
 # (HYPRLAND_INSTANCE_SIGNATURE, WAYLAND_DISPLAY, OMARCHY_PATH, PATH). Waits for
 # it, passes its output through and exits with its status.
+#
+# --expand-environment=no: by default systemd-run substitutes ${...} in the
+# command line itself, before bash runs, so "${files[@]}" in a snippet
+# silently became empty and qmllint linted nothing on the first runs.
 in_session() {
-  ssh_vm "systemd-run --user --quiet --collect --wait --pipe bash -c $(printf %q "$1")" </dev/null
+  ssh_vm "systemd-run --user --quiet --collect --wait --pipe --expand-environment=no bash -c $(printf %q "$1")" </dev/null
 }
 
 # The same, without waiting: for programs that keep running, like a window.
 in_session_bg() {
-  ssh_vm "systemd-run --user --quiet --collect bash -c $(printf %q "$1")" </dev/null
+  ssh_vm "systemd-run --user --quiet --collect --expand-environment=no bash -c $(printf %q "$1")" </dev/null
 }
 
 # wait_for <seconds> <description> <command...>: runs the command until it
