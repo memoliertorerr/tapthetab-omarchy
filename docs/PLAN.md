@@ -20,7 +20,7 @@
 |------|-------|-------|--------|
 | TTO0 | Scope docs, research, this plan; GitHub repo created | Opus 5.5 | ✅ done |
 | TTO1 | Scaffold: manifest, minimal overlay, manifest test, unit CI | Opus 5.5 | ✅ done |
-| TTO2 | End-to-end harness: boot Omarchy VM on Actions, install, summon, screenshot | Opus 5.5 | 🟨 written, awaiting first CI run |
+| TTO2 | End-to-end harness: boot Omarchy VM on Actions, install, summon, screenshot | Opus 5.5 | ✅ done |
 | TTO3 | Port the core logic to pure JS (fuzzy, recency, session, keys, filter) + unit tests | GPT-6.1 Sol | ✅ done |
 | TTO4 | Live windows, MRU tracking, search + Enter to switch (first usable build) | Opus 5.5 | ⬜ todo |
 | TTO5 | Hold Alt / release to switch, quick tap, bindings snippet, real-key e2e | Opus 5.5 | ⬜ todo |
@@ -29,7 +29,7 @@
 | TTO8 | Settings (inline plugin settings) | Sonnet 5.5 | ⬜ todo |
 | TTO9 | Release 0.1.0: README, preview image, changelog, marketplace submission text | Sonnet 5.5 | ⬜ todo |
 
-**Overall status: TTO0, TTO1 and TTO3 done; TTO2 is written and turns ✅ once the first `vm` run is green (fix commits until then). TTO4 next, after that.** The sequence front-loads the two things everything depends on — a test harness that runs on a real Omarchy desktop (TTO2) and a correct core model (TTO3) — then reaches a usable switcher at TTO4, the real Alt-hold feel at TTO5, and polish after. TTO2 and TTO3 touch disjoint files and can run in parallel sessions; commit them separately.
+**Overall status: TTO0–TTO3 done; the `vm` job is green on real Omarchy 4.0.6. TTO4 next.** The sequence front-loads the two things everything depends on — a test harness that runs on a real Omarchy desktop (TTO2) and a correct core model (TTO3) — then reaches a usable switcher at TTO4, the real Alt-hold feel at TTO5, and polish after. TTO2 and TTO3 touch disjoint files and can run in parallel sessions; commit them separately.
 
 **Model note:** Opus for the harness (TTO2: VM boot, SSH, QMP key injection — fiddly), the live-session wiring (TTO4) and the two spikes (TTO5 key release, TTO7 previews), where a wrong guess costs a CI round trip each time. GPT-6.1 Sol for the core port (TTO3): a precise, self-contained translation job with a written spec and test vectors, and a second model family cross-checks Claude's reading of the Swift code. Sonnet for scaffolding-shaped and documentation work. **TTO5 is the step most likely to become a spike** — whether Qt sees Alt's release on a layer surface that grabbed focus while Alt was held is unproven.
 
@@ -199,6 +199,9 @@ Update AGENTS.md (how to run CI, how scenarios work) and add any real friction t
 - Differences from the prompt: `ci/vm-boot` also waits for `omarchy-shell shell ping` (the shell starts after the compositor); qmllint fails the scenario only on `critical`/`fatal` findings and reports warnings in `out/qmllint.txt`; checkout uses `fetch-depth: 0` rather than proving `omarchy plugin add` works from a shallow clone; `push` runs only on `main`, like Omarchy's workflow.
 - Windows are foot terminals started with `uwsm-app -- xdg-terminal-exec --title=…`.
 - **Most likely first-run failures:** the qmllint binary name and its `--json` layout (written from memory); the session environment (`OMARCHY_PATH`, `PATH`, `WAYLAND_DISPLAY` in the user manager); foot honouring `--title`; `Switcher.qml` failing to load (read `out/shell.log`).
+
+**First runs (2026-10-31):** three fix commits to green. Run 1 failed on `OverlayWindow is not a type` (development-branch API; now a `PanelWindow`). Runs 1–2 linted nothing because `systemd-run` expanded `${...}` (see Landmines). Run [41199136595](https://github.com/memoliertorerr/tapthetab-omarchy/actions/runs/41199136595) is green: qmllint 6.12 checks `Switcher.qml` with no errors, the screenshot shows the overlay listing tto-a/b/c, the job takes about 55 s. The session environment, foot's `--title` and the qmllint `--json` layout all worked as written.
+- qmllint warnings to expect: `Member "…" not found on type "QObject"` for every `Color.menu.*` / `Style.*` token (Omarchy's singletons are typed as plain objects, so qmllint can't see their members) and `PanelWindow is not creatable` — both false positives. `Unqualified access` inside a delegate and `var` in block scope are real style warnings; TTO4's rewrite of the list should clear them.
 
 ---
 
@@ -391,7 +394,7 @@ Populated from real friction, not speculation:
 - **`systemd-run` rewrites `${...}` in the command it starts.** Unless given `--expand-environment=no`, it substitutes `${VAR}` forms itself (unset → empty) before bash runs, while bare `$VAR` survives. The qmllint snippet's `${files[@]}` became empty and `(( ${#files[@]} == 0 ))` became a syntax error that `if` swallowed, so two runs "passed" lint without linting anything. `ci/lib.sh` now passes the flag; keep it.
 - **A plain SSH login has no desktop environment.** `hyprctl`, `grim` and `omarchy-shell` need the session's environment; scenarios go through `in_session` (`systemd-run --user`).
 - **A summon right after `omarchy plugin add --enable` can answer `unknown`** until the shell reloads `shell.json`. It queues nothing, so the scenario retries.
-- **`OverlayWindow` is transparent for its first frames** (until the output's scale arrives); a screenshot taken the instant the layer maps can be empty.
+- **An overlay can be transparent for its first frames** (until the output's scale arrives); a screenshot taken the instant the layer maps can be empty, so scenarios wait a second first.
 - **The CI image (Omarchy 4.0.6-1 on 2026-10-30) is not the `quattro` checkout the research read** (`4.0.0.alpha`). Line numbers in `docs/research/omarchy-plugin-api.md` may not match what the VM runs.
 - **The CI image is Omarchy's moving stable release** from nightly.omarchy.org. A new Omarchy release can change shell APIs under us; the run summary prints the image's Omarchy version — check it first when a previously green scenario goes red.
 
