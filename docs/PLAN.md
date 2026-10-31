@@ -22,14 +22,14 @@
 | TTO1 | Scaffold: manifest, minimal overlay, manifest test, unit CI | Opus 5.5 | ✅ done |
 | TTO2 | End-to-end harness: boot Omarchy VM on Actions, install, summon, screenshot | Opus 5.5 | ✅ done |
 | TTO3 | Port the core logic to pure JS (fuzzy, recency, session, keys, filter) + unit tests | GPT-6.1 Sol | ✅ done |
-| TTO4 | Live windows, MRU tracking, search + Enter to switch (first usable build) | Opus 5.5 | 🟨 written, awaiting first VM run |
+| TTO4 | Live windows, MRU tracking, search + Enter to switch (first usable build) | Opus 5.5 | ✅ done |
 | TTO5 | Hold Alt / release to switch, quick tap, bindings snippet, real-key e2e | Opus 5.5 | ⬜ todo |
 | TTO6 | Look and feel: list + grid, icons, highlights, theme, placement | Sonnet 5.5 | ⬜ todo |
 | TTO7 | Opt-in live window previews | Opus 5.5 | ⬜ todo |
 | TTO8 | Settings (inline plugin settings) | Sonnet 5.5 | ⬜ todo |
 | TTO9 | Release 0.1.0: README, preview image, changelog, marketplace submission text | Sonnet 5.5 | ⬜ todo |
 
-**Overall status: TTO0–TTO3 done; the `vm` job is green on real Omarchy 4.0.6. TTO4 is written and turns ✅ once its scenarios pass in the `vm` job (fix commits until then).** The sequence front-loads the two things everything depends on — a test harness that runs on a real Omarchy desktop (TTO2) and a correct core model (TTO3) — then reaches a usable switcher at TTO4, the real Alt-hold feel at TTO5, and polish after. TTO2 and TTO3 touch disjoint files and can run in parallel sessions; commit them separately.
+**Overall status: TTO0–TTO4 done; the switcher lists, searches and switches on real Omarchy 4.0.6 (summoned by command). TTO5 next: hold Alt, release to switch.** The sequence front-loads the two things everything depends on — a test harness that runs on a real Omarchy desktop (TTO2) and a correct core model (TTO3) — then reaches a usable switcher at TTO4, the real Alt-hold feel at TTO5, and polish after. TTO2 and TTO3 touch disjoint files and can run in parallel sessions; commit them separately.
 
 **Model note:** Opus for the harness (TTO2: VM boot, SSH, QMP key injection — fiddly), the live-session wiring (TTO4) and the two spikes (TTO5 key release, TTO7 previews), where a wrong guess costs a CI round trip each time. GPT-6.1 Sol for the core port (TTO3): a precise, self-contained translation job with a written spec and test vectors, and a second model family cross-checks Claude's reading of the Swift code. Sonnet for scaffolding-shaped and documentation work. **TTO5 is the step most likely to become a spike** — whether Qt sees Alt's release on a layer surface that grabbed focus while Alt was held is unproven.
 
@@ -273,7 +273,8 @@ Update AGENTS.md and README.md (what works now). Flip TTO4 to ✅ in docs/PLAN.m
 - **Debug IPC:** `IpcHandler { target: "tapthetab" }` with a read-only `state()`; scenarios read it through `switcher '<jq>'` in `ci/lib.sh`. TTO5's verbs join the same target.
 - MRU seeding from `focusHistoryID` is lazy, at the first `open()`, from the one load-time `refreshToplevels()` (nothing signals when that refresh lands, and a timer isn't allowed). Until a window gets focus, the app id falls back to Hyprland's `class`.
 - Lib aliases in QML are `KeyRouter` and `ItemFilter`: importing `lib/Keys.js` as `Keys` would shadow QML's attached `Keys`.
-- **Not verified:** QV4 loading `lib/Windows.js` and `Keys.fromQt`; the `HyprlandToplevel` properties used (`workspace`, `monitor`, `lastIpcObject`, `wayland`); `hl.dsp.window.move` taking `window` and `workspace` together (only the development branch's dock does it); the `name:` workspace selector in Lua dispatches; QMP qcode `minus` typing `-` on the VM's layout.
+- **First run green (2026-10-31):** [run 41231912102](https://github.com/memoliertorerr/tapthetab-omarchy/actions/runs/41231912102) passed all three scenarios with no fix commits. Rows came out `tto-c,tto-b,tto-a`; typing `tto-a` with real QMP keys left one row; Enter unmapped the layer and focused tto-a; after focusing tto-b the order was `tto-b,tto-a,tto-c`; the plugin-only shell started nothing in 30 s while windows opened, closed and took focus. qmllint shows only the known false positives. Screenshots are in `docs/images/` and the README.
+- **Still not verified:** moving a minimized window (`hl.dsp.window.move` with `window` and `workspace` together, and the `name:` selector) — no scenario minimizes a window yet; a real keyboard and the feel, on the developer's machine.
 
 ---
 
