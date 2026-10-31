@@ -120,6 +120,54 @@ active_title() {
   in_session "hyprctl -j activewindow | jq -r '.title // empty'"
 }
 
+active_is() {
+  [[ $(active_title) == "$1" ]]
+}
+
+# window_address <title>: the address (0x…) of the first window with that
+# title, as hyprctl prints it, or nothing.
+window_address() {
+  in_session "hyprctl -j clients | jq -r --arg t $(printf %q "$1") 'first(.[] | select(.title == \$t) | .address) // empty'"
+}
+
+window_gone() {
+  in_session "hyprctl -j clients | jq -e --arg a $(printf %q "$1") 'all(.[]; .address != \$a)'"
+}
+
+# hypr_dispatch <dispatcher>: a Hyprland dispatch in the Lua syntax Omarchy's
+# own scripts use, e.g. 'hl.dsp.focus({ window = "address:0x…" })'.
+hypr_dispatch() {
+  in_session "hyprctl dispatch $(printf %q "$1")" >/dev/null
+}
+
+# focus_window <title>: focuses the window by address, as Omarchy's
+# omarchy-hyprland-focus-app does, and waits until it is active.
+focus_window() {
+  local title=$1 address
+  address=$(window_address "$title")
+  [[ -n $address ]] || fail "no window titled $title to focus"
+  hypr_dispatch "hl.dsp.focus({ window = \"address:$address\" })"
+  wait_for 10 "window $title to be active" active_is "$title"
+  log "window $title is active"
+}
+
+# close_window <title>: closes every window with that title, one at a time,
+# as omarchy-hyprland-window-close-all does, and waits for each to go.
+close_window() {
+  local title=$1 address
+  while address=$(window_address "$title") && [[ -n $address ]]; do
+    hypr_dispatch "hl.dsp.window.close({ window = \"address:$address\" })"
+    wait_for 10 "window $title ($address) to close" window_gone "$address"
+    log "window $title ($address) is closed"
+  done
+}
+
+# switcher <jq filter>: what the switcher shows, from the plugin's read-only
+# `tapthetab state` IPC call, through a jq filter (jq runs in the VM).
+switcher() {
+  in_session "omarchy-shell tapthetab state | jq -r $(printf %q "$1")"
+}
+
 # omarchy-shell <target> <method> [args...] in the session.
 shell_ipc() {
   local command="omarchy-shell" arg

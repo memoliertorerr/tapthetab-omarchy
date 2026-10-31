@@ -22,14 +22,14 @@
 | TTO1 | Scaffold: manifest, minimal overlay, manifest test, unit CI | Opus 5.5 | ✅ done |
 | TTO2 | End-to-end harness: boot Omarchy VM on Actions, install, summon, screenshot | Opus 5.5 | ✅ done |
 | TTO3 | Port the core logic to pure JS (fuzzy, recency, session, keys, filter) + unit tests | GPT-6.1 Sol | ✅ done |
-| TTO4 | Live windows, MRU tracking, search + Enter to switch (first usable build) | Opus 5.5 | ⬜ todo |
+| TTO4 | Live windows, MRU tracking, search + Enter to switch (first usable build) | Opus 5.5 | 🟨 written, awaiting first VM run |
 | TTO5 | Hold Alt / release to switch, quick tap, bindings snippet, real-key e2e | Opus 5.5 | ⬜ todo |
 | TTO6 | Look and feel: list + grid, icons, highlights, theme, placement | Sonnet 5.5 | ⬜ todo |
 | TTO7 | Opt-in live window previews | Opus 5.5 | ⬜ todo |
 | TTO8 | Settings (inline plugin settings) | Sonnet 5.5 | ⬜ todo |
 | TTO9 | Release 0.1.0: README, preview image, changelog, marketplace submission text | Sonnet 5.5 | ⬜ todo |
 
-**Overall status: TTO0–TTO3 done; the `vm` job is green on real Omarchy 4.0.6. TTO4 next.** The sequence front-loads the two things everything depends on — a test harness that runs on a real Omarchy desktop (TTO2) and a correct core model (TTO3) — then reaches a usable switcher at TTO4, the real Alt-hold feel at TTO5, and polish after. TTO2 and TTO3 touch disjoint files and can run in parallel sessions; commit them separately.
+**Overall status: TTO0–TTO3 done; the `vm` job is green on real Omarchy 4.0.6. TTO4 is written and turns ✅ once its scenarios pass in the `vm` job (fix commits until then).** The sequence front-loads the two things everything depends on — a test harness that runs on a real Omarchy desktop (TTO2) and a correct core model (TTO3) — then reaches a usable switcher at TTO4, the real Alt-hold feel at TTO5, and polish after. TTO2 and TTO3 touch disjoint files and can run in parallel sessions; commit them separately.
 
 **Model note:** Opus for the harness (TTO2: VM boot, SSH, QMP key injection — fiddly), the live-session wiring (TTO4) and the two spikes (TTO5 key release, TTO7 previews), where a wrong guess costs a CI round trip each time. GPT-6.1 Sol for the core port (TTO3): a precise, self-contained translation job with a written spec and test vectors, and a second model family cross-checks Claude's reading of the Swift code. Sonnet for scaffolding-shaped and documentation work. **TTO5 is the step most likely to become a spike** — whether Qt sees Alt's release on a layer surface that grabbed focus while Alt was held is unproven.
 
@@ -128,7 +128,7 @@ git push -u origin main --tags
 - **New repo, no shared code with the Swift app.** `../tapthetab` is the behavioural reference. `docs/research/port-spec.md` is the written contract for the port; when it and the Swift code disagree, the Swift code and its tests win and the spec gets fixed.
 - **Kinds `overlay`, with `keepLoaded: true`.** One entry, `Switcher.qml`. `keepLoaded` keeps the global shortcuts, IPC target and MRU tracker alive before the first summon. Split out a `service` kind only if TTO5 proves it necessary.
 - **Our own MRU list.** Tracked from `activewindowv2` raw events, seeded once from `focusHistoryID` after a single `Hyprland.refreshToplevels()`. `lastIpcObject` is stale between refreshes, so never read order from it on open.
-- **Focus in-process.** `Hyprland.dispatch(...)` with `hl.dsp.focus` + `hl.dsp.window.alter_zorder`, as Omarchy's notifications and dock do; minimized windows (special workspaces) are brought to the active workspace first, like the dock's `bringForward`. No `hyprctl` process per switch.
+- **Focus in-process.** `Hyprland.dispatch(...)` with `hl.dsp.focus` + `hl.dsp.window.alter_zorder`, in the syntax stable Omarchy's `bin/` scripts use (`omarchy-hyprland-focus-app`, `omarchy-hyprland-window-pop`); minimized windows (special workspaces) are brought to the active workspace first, like the development branch's dock `bringForward` (stable 4.0.6 has no dock). No `hyprctl` process per switch.
 - **Release detection: Qt first, Hyprland fallback, both idempotent.** TTO5 spikes `Keys.onReleased` on the exclusive-focus overlay; the fallback is a Hyprland release bind on `ALT + Alt_L` (`{ release = true, transparent = true, ignore_mods = true, non_consuming = true }`) dispatching `hl.dsp.global("tapthetab:commit")`. A commit that arrives twice does nothing the second time.
 - **Settings are inline plugin settings** in the plugin's `plugins[]` entry in `~/.config/omarchy/shell.json`, written through `shell.updateEntryInline`. Not a separate JSON file: this is how Omarchy plugins persist settings.
 - **CI reuses Omarchy's VM approach.** Omarchy boots its stable VM image under KVM on GitHub's `ubuntu-26.04` runners (`.github/workflows/test.yml` and `test/ci-vm` in the Omarchy repo, MIT). We adapt that script (with attribution), add a QMP socket so scenarios can press real keys, and run our scenarios from the host side.
@@ -264,6 +264,17 @@ Run `node --test`. You cannot see the result; CI is the check. After my push, re
 Update AGENTS.md and README.md (what works now). Flip TTO4 to ✅ in docs/PLAN.md in the same change, then show me the diff and a single block with BOTH the git commit ("tto-step-4: live window list, MRU order, search and switching") AND git push. Do not commit.
 ```
 
+**Implementation notes (2026-10-31):**
+
+- Built by a Claude Opus subagent, reviewed by GPT-6.1 Sol; the review's four findings were fixed before the first push. 163 unit tests. Nothing has run in QML yet: the first `vm` run is the check.
+- **Plan assumptions that didn't hold on stable 4.0.6:** there is no dock plugin (dispatch syntax comes from `bin/` scripts instead) and no `test/shell.d/shell-idle-spawn-test.sh` (the idea comes from the development branch). Stable's own shell starts processes while idle, so `03-idle-no-spawn.sh` runs a second shell that loads only the installed `Switcher.qml` and watches that one: no new process in its cgroup, and no change in its reaped-children fault counters, for 30 s while focus moves and a window opens and closes.
+- **Focus after Enter:** Hyprland refuses window focus while an exclusive-keyboard layer is mapped (confirmed in Hyprland 0.56.2's `FocusState.cpp`), so the overlay closes, dispatches focus at once, and dispatches again on its own `closelayer>>tapthetab`. Only that event, or the chosen window getting focus, ends the wait. Most likely first-run failure.
+- **Review fixes:** ordinary named workspaces have negative ids too (from -1337 down), so "special" is decided by name, and a minimized window moves to a named active workspace as `name:<name>` (only for plain names); title changes and late Wayland handles rebuild an open list (an `Instantiator` over the toplevels, active only while open); the idle scenario fails if its event driver can't open and close its window.
+- **Debug IPC:** `IpcHandler { target: "tapthetab" }` with a read-only `state()`; scenarios read it through `switcher '<jq>'` in `ci/lib.sh`. TTO5's verbs join the same target.
+- MRU seeding from `focusHistoryID` is lazy, at the first `open()`, from the one load-time `refreshToplevels()` (nothing signals when that refresh lands, and a timer isn't allowed). Until a window gets focus, the app id falls back to Hyprland's `class`.
+- Lib aliases in QML are `KeyRouter` and `ItemFilter`: importing `lib/Keys.js` as `Keys` would shadow QML's attached `Keys`.
+- **Not verified:** QV4 loading `lib/Windows.js` and `Keys.fromQt`; the `HyprlandToplevel` properties used (`workspace`, `monitor`, `lastIpcObject`, `wayland`); `hl.dsp.window.move` taking `window` and `workspace` together (only the development branch's dock does it); the `name:` workspace selector in Lua dispatches; QMP qcode `minus` typing `-` on the VM's layout.
+
 ---
 
 ### TTO5 — Hold Alt, release to switch · Opus 5.5
@@ -374,6 +385,8 @@ Run `node --test`. Flip TTO9 to ✅ in docs/PLAN.md in the same change, then sho
 - **Unicode coverage** (surfaced by TTO3). Without `Intl`, the segmenter skips full Unicode grapheme rules (Indic conjuncts, Hangul jamo composition, every script's combining marks) and folding skips expansions like `ß` → `ss`. Revisit if users report missed matches; if QV4 turns out to have `Intl.Segmenter`, feature-detect and prefer it.
 - **QV4 `Array.prototype.sort` stability** (surfaced by TTO3). Unknown; lib code keeps explicit tie-breaks so it doesn't matter.
 - **Scenario filter in the workflow** (surfaced by TTO2). `ci/run-scenarios` honours `TTO_SCENARIOS`, but `vm.yml` has no `workflow_dispatch` input that passes it through.
+- **SearchMemory isn't recorded on activation** (surfaced by TTO4). Session supports it; Switcher.qml doesn't record picks yet.
+- **No `no_anim` around the minimized-window move** (surfaced by TTO4). The development-branch dock sets and unsets it; the unset needs a 0.4 s delay, i.e. a timer.
 - *(Steps add to this list as they surface out-of-scope friction.)*
 
 ---
@@ -392,6 +405,11 @@ Populated from real friction, not speculation:
 - **No local Omarchy.** Development happens on an Apple Silicon Mac with no Quickshell or Hyprland; QML is first exercised in the CI VM. Expect a fix-commit round trip on QML-heavy steps. A local Omarchy VM needs about 40–50 GB free disk (the Mac had 13.5 GB free on 2026-10-30).
 - **qmllint can't resolve `qs.*` with only `-I "$OMARCHY_PATH/shell"`.** Omarchy's qmldir files say `module qs.Commons` but live at `shell/Commons`, so qmllint looks for `<import path>/qs/Commons`. The scenario links `qs` to the shell directory in a scratch import root. Omarchy itself never runs qmllint, so there's nothing to copy.
 - **`systemd-run` rewrites `${...}` in the command it starts.** Unless given `--expand-environment=no`, it substitutes `${VAR}` forms itself (unset → empty) before bash runs, while bare `$VAR` survives. The qmllint snippet's `${files[@]}` became empty and `(( ${#files[@]} == 0 ))` became a syntax error that `if` swallowed, so two runs "passed" lint without linting anything. `ci/lib.sh` now passes the flag; keep it.
+- **Stable Omarchy's shell starts processes while idle** (battery every 30 s, keyboard layout, tailscale, dropbox, agents), so a no-spawn check against the session shell fails regardless of the plugin. `03-idle-no-spawn.sh` watches a plugin-only second shell instead. For TTO5: that second shell will also register any `GlobalShortcut` with appid `tapthetab`.
+- **Exclusive-keyboard layers block window focus.** A focus dispatch sent while the overlay is mapped is ignored; send it again on the overlay's `closelayer`.
+- **Raw-event addresses lack `0x`**; toplevel and `hyprctl` addresses carry it. `lib/Windows.js` normalises both.
+- **Named workspaces have negative ids** (from -1337 down), like special ones; tell them apart by the `special` name prefix.
+- **`Util.editsFilter` ignores Alt-modified keys.** Fine for typing; matters for TTO5, where Alt is held while typing.
 - **A plain SSH login has no desktop environment.** `hyprctl`, `grim` and `omarchy-shell` need the session's environment; scenarios go through `in_session` (`systemd-run --user`).
 - **A summon right after `omarchy plugin add --enable` can answer `unknown`** until the shell reloads `shell.json`. It queues nothing, so the scenario retries.
 - **An overlay can be transparent for its first frames** (until the output's scale arrives); a screenshot taken the instant the layer maps can be empty, so scenarios wait a second first.
